@@ -1,0 +1,340 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hydrogen vs Diesel Generator Cost Comparison</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel-standalone@7.22.9/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState } = React;
+
+    const GeneratorComparisonTool = () => {
+      // State for input parameters
+      const [inputs, setInputs] = useState({
+        powerCapacity: 50, // kW
+        operatingHours: 1000, // hours/year
+        lifespan: 10, // years
+        discountRate: 5, // %
+        h2CapitalCost: 3000, // $/kW
+        h2InstallCost: 50000, // $
+        h2FuelCost: 5, // $/kg
+        h2FuelConsumption: 0.05, // kg/kWh
+        h2MaintenanceCost: 0.02, // $/kWh
+        dieselCapitalCost: 1000, // $/kW
+        dieselInstallCost: 20000, // $
+        dieselFuelCost: 1.5, // $/L
+        dieselFuelConsumption: 0.3, // L/kWh
+        dieselMaintenanceCost: 0.08, // $/kWh
+        carbonPrice: 100, // $/tonne CO2
+      });
+
+      // Handle input changes
+      const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setInputs({ ...inputs, [name]: parseFloat(value) || 0 });
+      };
+
+      // Calculate NPV for costs
+      const calculateNPV = (annualCost, years, discountRate) => {
+        let npv = 0;
+        for (let i = 1; i <= years; i++) {
+          npv += annualCost / Math.pow(1 + discountRate / 100, i);
+        }
+        return npv;
+      };
+
+      // Calculate LCOE
+      const calculateLCOE = () => {
+        const {
+          powerCapacity,
+          operatingHours,
+          lifespan,
+          discountRate,
+          h2CapitalCost,
+          h2InstallCost,
+          h2FuelCost,
+          h2FuelConsumption,
+          h2MaintenanceCost,
+          dieselCapitalCost,
+          dieselInstallCost,
+          dieselFuelCost,
+          dieselFuelConsumption,
+          dieselMaintenanceCost,
+          carbonPrice,
+        } = inputs;
+
+        // Total energy output (kWh)
+        const totalOutput = powerCapacity * operatingHours * lifespan;
+
+        // Hydrogen Fuel Cell LCOE
+        const h2InitialCost = h2CapitalCost * powerCapacity + h2InstallCost;
+        const h2AnnualFuelCost = h2FuelConsumption * powerCapacity * operatingHours * h2FuelCost;
+        const h2AnnualMaintenanceCost = h2MaintenanceCost * powerCapacity * operatingHours;
+        const h2TotalAnnualCost = h2AnnualFuelCost + h2AnnualMaintenanceCost;
+        const h2NPV = h2InitialCost + calculateNPV(h2TotalAnnualCost, lifespan, discountRate);
+        const h2LCOE = (h2NPV / totalOutput).toFixed(3);
+
+        // Diesel Generator LCOE
+        const dieselInitialCost = dieselCapitalCost * powerCapacity + dieselInstallCost;
+        const dieselAnnualFuelCost = dieselFuelConsumption * powerCapacity * operatingHours * dieselFuelCost;
+        const dieselAnnualMaintenanceCost = dieselMaintenanceCost * powerCapacity * operatingHours;
+        const dieselCarbonCost = 0.8 * powerCapacity * operatingHours * (carbonPrice / 1000); // 0.8 kg CO2/kWh
+        const dieselTotalAnnualCost = dieselAnnualFuelCost + dieselAnnualMaintenanceCost + dieselCarbonCost;
+        const dieselNPV = dieselInitialCost + calculateNPV(dieselTotalAnnualCost, lifespan, discountRate);
+        const dieselLCOE = (dieselNPV / totalOutput).toFixed(3);
+
+        return { h2LCOE, dieselLCOE };
+      };
+
+      const { h2LCOE, dieselLCOE } = calculateLCOE();
+
+      return (
+        <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-3xl">
+          <h1 className="text-2xl font-bold mb-4 text-center">Hydrogen vs Diesel Generator Cost Comparison</h1>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h2 className="text-lg font-semibold mb-2">General Parameters</h2>
+              <div className="mb-2">
+                <label className="block text-sm">Power Capacity (kW)</label>
+                <input
+                  type="number"
+                  name="powerCapacity"
+                  value={inputs.powerCapacity}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Operating Hours (h/year)</label>
+                <input
+                  type="number"
+                  name="operatingHours"
+                  value={inputs.operatingHours}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Lifespan (years)</label>
+                <input
+                  type="number"
+                  name="lifespan"
+                  value={inputs.lifespan}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Discount Rate (%)</label>
+                <input
+                  type="number"
+                  name="discountRate"
+                  value={inputs.discountRate}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Carbon Price ($/tonne CO2)</label>
+                <input
+                  type="number"
+                  name="carbonPrice"
+                  value={inputs.carbonPrice}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold mb-2">Hydrogen Fuel Cell</h2>
+              <div className="mb-2">
+                <label className="block text-sm">Capital Cost ($/kW)</label>
+                <input
+                  type="number"
+                  name="h2CapitalCost"
+                  value={inputs.h2CapitalCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Installation Cost ($)</label>
+                <input
+                  type="number"
+                  name="h2InstallCost"
+                  value={inputs.h2InstallCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Fuel Cost ($/kg)</label>
+                <input
+                  type="number"
+                  name="h2FuelCost"
+                  value={inputs.h2FuelCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Fuel Consumption (kg/kWh)</label>
+                <input
+                  type="number"
+                  name="h2FuelConsumption"
+                  value={inputs.h2FuelConsumption}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Maintenance Cost ($/kWh)</label>
+                <input
+                  type="number"
+                  name="h2MaintenanceCost"
+                  value={inputs.h2MaintenanceCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold mb-2">Diesel Generator</h2>
+              <div className="mb-2">
+                <label className="block text-sm">Capital Cost ($/kW)</label>
+                <input
+                  type="number"
+                  name="dieselCapitalCost"
+                  value={inputs.dieselCapitalCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Installation Cost ($)</label>
+                <input
+                  type="number"
+                  name="dieselInstallCost"
+                  value={inputs.dieselInstallCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Fuel Cost ($/L)</label>
+                <input
+                  type="number"
+                  name="dieselFuelCost"
+                  value={inputs.dieselFuelCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Fuel Consumption (L/kWh)</label>
+                <input
+                  type="number"
+                  name="dieselFuelConsumption"
+                  value={inputs.dieselFuelConsumption}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div className="mb-2">
+                <label className="block text-sm">Maintenance Cost ($/kWh)</label>
+                <input
+                  type="number"
+                  name="dieselMaintenanceCost"
+                  value={inputs.dieselMaintenanceCost}
+                  onChange={handleInputChange}
+                  className="w-full p-2 border rounded"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="mt-6">
+            <h2 className="text-lg font-semibold mb-2">Results</h2>
+            <p className="text-sm">
+              Hydrogen Fuel Cell LCOE: <span className="font-bold">${h2LCOE}/kWh</span>
+            </p>
+            <p className="text-sm">
+              Diesel Generator LCOE: <span className="font-bold">${dieselLCOE}/kWh</span>
+            </p>
+            <p className="text-sm mt-2">
+              {h2LCOE < dieselLCOE
+                ? 'Hydrogen Fuel Cell is more cost-effective.'
+                : 'Diesel Generator is more cost-effective.'}
+            </p>
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<GeneratorComparisonTool />, document.getElementById('root'));
+  </script>
+</body>
+</html>
